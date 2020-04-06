@@ -5,28 +5,44 @@ date: "3/25/2020"
 output: html_document
 ---
 
-#group project RMD 
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
+## Data Cleaning 
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+```{r}
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+shotlog <- read.csv("shot_logs.csv")
 
-```{r cars}
-summary(cars)
+shotlog$FGM <- NULL
+shotlog$PERIOD <- as.factor(shotlog$PERIOD)
+shotlog$PTS_TYPE <- as.factor(shotlog$PTS_TYPE)
+shotlog$CLOSEST_DEFENDER <- NULL
+shotlog$CLOSEST_DEFENDER_PLAYER_ID <- NULL
+shotlog$PTS <- NULL
+shotlog$FGM <- NULL
+shotlog$GAME_ID <- NULL
+shotlog$MATCHUP <- NULL
+shotlog$W <- NULL
+shotlog$FINAL_MARGIN <- NULL
+shotlog$player_id <- NULL
+shotlog$SHOT_CLOCK[is.na(shotlog$SHOT_CLOCK)] <- 0
+shotlog <- na.omit(shotlog)
+shotlog$GAME_CLOCK <- as.numeric(shotlog$GAME_CLOCK)
+shotlog$GAME_CLOCK <- NULL
+str(shotlog)
+
+
+
 ```
 
-## Including Plots
-
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
+## Russell Westbrook Shot Making Models
+```{r}
+russellwestbrook <- shotlog[shotlog$player_name == "russell westbrook", ]
+russellwestbrook$player_name <- NULL
+str(russellwestbrook)
+logisticwestbrook <-glm(russellwestbrook$SHOT_RESULT ~ ., data = russellwestbrook, family = "binomial")
+summary(logisticwestbrook)
 ```
-
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
