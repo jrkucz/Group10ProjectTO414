@@ -1,0 +1,88 @@
+---
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### **Predicting NBA Shot Outcomes**
+#### Joey Keating, Jack Kuczmanski, Aroon Prabhu, Alex Sooch, Nikhil Venkata  
+#####  TO 414 - Final Project - April 2020
+
+------
+
+```{r}
+shot_logs <- read.csv("shot_logs.csv")
+```
+
+The dataset ` shot_logs` was sourced from kaggle, and contains information on shots taken during the 2014-2015 season. With this data, we will build a model that predicts whether or the shooter will make his shot. In doing this analysis, we will gain an understanding of what factors contribute to the likelihood of making a shot in the NBA. Furthermore, with a model in hand, we can conduct more thorough analyses regarding individual players and defenders. 
+
+------
+
+##### **Checking Structure** 
+To begin, we will take a look at the structure of the data. 
+
+```{r}
+str(shot_logs)
+```
+
+------
+
+
+##### **Preparing & Cleaning Data** 
+In observing the structure of the data, we can see that there are columns that contain redundant information, or information that won't be relevant in prediction. We will remove those columns.
+
+```{r}
+shot_logs$GAME_ID<-NULL
+shot_logs$MATCHUP<-NULL
+shot_logs$LOCATION<-NULL
+shot_logs$W<-NULL
+shot_logs$FINAL_MARGIN<-NULL
+shot_logs$GAME_CLOCK<-NULL
+shot_logs$SHOT_RESULT<-NULL
+shot_logs$CLOSEST_DEFENDER_PLAYER_ID<-NULL
+shot_logs$player_id<-NULL
+```
+
+Secondly, there are columns that should be re-coded as factors, including our response variable, ` FGM`, which indicates whether or not the shot was made. 
+
+```{r}
+shot_logs$FGM<-as.factor(shot_logs$FGM)
+shot_logs$PERIOD<-as.factor(shot_logs$PERIOD)
+shot_logs$PTS_TYPE<-as.factor(shot_logs$PTS_TYPE)
+```
+
+------
+
+##### **Re-Checking Structure** 
+```{r}
+str(shot_logs)
+```
+
+------
+
+##### **Testing Significance with Logistic Regression** 
+With the data prepared, we can make an initial logistic regression to get an idea for the significance of certain variables regarding their relation to whether or not a shot was made. 
+
+We will look at all the numeric variables we have: 
+
+* ` DRIBBLES`: number of dribbles the player took before shooting 
+* ` TOUCH_TIME`: time the player took to shoot after receiveing the ball (seconds)
+* ` SHOT_DIST` : distance the player was from the basket at the time of the shot (feet)
+* ` CLOSE_DEF_DIST`: the distance between the shooter and the nearest defender (feet)
+* ` SHOT_CLOCK`: time remaining on shot clock (seconds)
+
+```{r}
+log_model<-glm(FGM ~ DRIBBLES + TOUCH_TIME + SHOT_DIST + CLOSE_DEF_DIST + SHOT_CLOCK, 
+                     data=shot_logs, family="binomial")
+
+summary(log_model)
+
+```
+
+From the summary of the logistic regression, ` log_model`, we can see that all 5 variables are highly significant in predicting whether or not a shot was made. 
+
+------
+
+
