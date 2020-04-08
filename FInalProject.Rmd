@@ -1,0 +1,23 @@
+---
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readr)
+```
+
+### *Predicting NBA Shot Outcomes*
+####  **TO 414 - Final Project** 
+#### Joey Keating, Jack Kuczmanski, Aroon Prabhu, Alex Sooch, Nikhil Venkata,   - 3/29/2020
+
+```{r}
+shot_logs <- read_csv("Desktop/shot_logs.csv")
+
+str(shot_logs)
+```
+
+
+
+
+
