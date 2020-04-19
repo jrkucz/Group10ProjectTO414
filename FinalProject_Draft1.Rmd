@@ -1,0 +1,337 @@
+---
+output: html_document
+---
+
+```{r setup, include=FALSE, warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## this one is lebron
+
+### **Predicting James Harden's Shot Outcomes**
+#### Joey Keating, Jack Kuczmanski, Aroon Prabhu, Alex Sooch, Nikhil Venkata  
+#####  TO 414 - Final Project - April 2020
+
+----- 
+
+```{r warning=FALSE, message=FALSE}
+library(dplyr); library(class); library(caret); library(kernlab); library(neuralnet); library(C50)
+
+shot_logs <- read.csv("shot_logs.csv")
+```
+
+----- 
+
+#####  **About the Data**
+
+The data used for this project, titled "NBA Shot Logs," was sourced from kaggle.com. The data contains information on shots taken during the 2014-2015 NBA season. For each record in the data set, the following information is available: who took the shot, the distance the player was from the basket at the time of the shot, who the nearest defender was, how far away the nearest defender was, time on the clock, and more. 
+
+The goal in this project is two fold:
+
+1. Idenfity the variables that have an impact on a player's ability to make a shot
+
+2. Use Machine Learning Algorithms to predict shot results for a specific player, James Harden  
+
+----- 
+
+#####  **Data Processing**
+Before exploring the data and building models, certain processing measures should be taken. 
+
+```{r}
+str(shot_logs)
+```
+
+In observing the structure of the data, there are columns that contain redundant information, or information that won't be relevant in prediction. Those columns can be removed.
+
+```{r}
+shot_logs$GAME_ID<-NULL
+shot_logs$W<-NULL
+shot_logs$GAME_CLOCK<-NULL
+shot_logs$SHOT_RESULT<-NULL
+shot_logs$CLOSEST_DEFENDER_PLAYER_ID<-NULL
+shot_logs$player_id<-NULL
+shot_logs$PTS<-NULL
+```
+
+
+Secondly, there are columns that should be re-coded as factors, including the response variable, ` FGM`, which indicates whether or not the shot was made. 
+
+```{r}
+shot_logs$FGM<-as.factor(shot_logs$FGM)
+shot_logs$PERIOD<-as.factor(shot_logs$PERIOD)
+shot_logs$PTS_TYPE<-as.factor(shot_logs$PTS_TYPE)
+```
+
+----- 
+
+#####  **Testing Significance with Logistic Regression**
+
+With initial processing complete, a logistic regression can be used to identify which variables are significant in predicting whether a player will make his shot. 
+
+We will look at all the variables we have: 
+
+* ` DRIBBLES`: number of dribbles the player took before shooting 
+* ` TOUCH_TIME`: time the player took to shoot after receiveing the ball (seconds)
+* ` SHOT_DIST` : distance the player was from the basket at the time of the shot (feet)
+* ` CLOSE_DEF_DIST`: the distance between the shooter and the nearest defender (feet)
+* ` SHOT_CLOCK`: time remaining on shot clock (seconds)
+* ` SHOT_NUMBER`: a counter representing the amount of shots the player has taken in a specific game
+* ` FINAL_MARGIN`: final margin of the game, with negative numbers indicating the shooter's team lost
+* ` LOCATION`: whether the game was played at the shooter's home arena or on the road
+* ` PERIOD`: the period of the game, with numbers greater than 4 indicating overtime 
+
+```{r}
+log_model<-glm(FGM ~ DRIBBLES + TOUCH_TIME + SHOT_DIST + CLOSE_DEF_DIST + SHOT_CLOCK + 
+                     SHOT_NUMBER + FINAL_MARGIN + LOCATION + PERIOD, 
+                     data=shot_logs, family="binomial")
+
+summary(log_model)
+```
+
+The output of the logistic model shows that most of the variables are highly significant. The only variable that does not have any significance related to it is ` LOCATION`. However, this could change when looking at individual players. Overall, the logisitc model shows that there are plenty of variables that have predictive ability. 
+
+----- 
+
+#####  **Subsetting James Harden**
+Basketball is a very context specific game - from player to player, things like shot selection and the "make-ability" of a particular shot will vary. The purpose of being able to predict the success of a shot attempt would be to identify "good" shots vs. "bad" shots. Because evey shot taken in an NBA game is context dependent, it doesn't necessarily make sense to make predictions on a league-wide basis. 
+
+```{r warning=FALSE, message=FALSE}
+shot_logs %>% group_by(player_name) %>% summarize(total_shots=n()) %>% arrange(desc(total_shots)) %>% top_n(10)
+```
+
+Because James Harden has the most volume of shots taken, his data will be used for prediction. 
+
+```{r}
+harden<-shot_logs %>% filter(player_name=="lebron james")
+```
+
+----- 
+
+#####  **Exploring Harden's Data**
+
+In the 2014-2015 NBA Season, Harden appeared in 81 games. Unfortunately, only **`r n_distinct(harden$MATCHUP)`** of his games are present in the data set.
+
+In these games, James Harden...
+
+* took **`r nrow(harden)`** total shots 
+* took **`r nrow(harden[harden$PTS_TYPE=="2", ] )`** 2 point shots  
+* took **`r nrow(harden[harden$PTS_TYPE=="3", ] )`** 3 point shots  
+* had a field goal percentage of **`r paste(round(nrow(harden[harden$FGM==1, ]) / nrow(harden) * 100), "%")`**
+
+In addition to these basic statistcs, we can visualize Harden's shot selection. 
+
+```{r fig.align="center", fig.width=12, warning=FALSE, message=FALSE}
+ggplot(data=harden)+ 
+  geom_histogram(aes(x=SHOT_DIST), color="black", fill="red")+ 
+  labs(x="Distance From Basket (ft.)", 
+       y="Total Shots", 
+       title="Harden's Shot Distribution by Distance from Basket")+
+  theme_bw()
+
+```
+
+This chart conveys that Harden refrains from shooting mid-range shots, with the overwhelming majority of his attempts coming from with 10 feet or beyond 20. There also may be shot selection patterns based on whether Harden is playing in his home arena.  
+
+```{r fig.align="center", fig.width=12, warning=FALSE, message=FALSE}
+ggplot(data=harden)+ 
+  geom_histogram(aes(x=SHOT_DIST, fill=LOCATION), color="black")+ 
+  labs(x="Distance From Basket (ft.)", 
+       y="Total Shots", 
+       title="Harden's Shot Distribution by Distance from Basket")+
+  facet_wrap(~LOCATION)+
+  scale_fill_manual(values = c("H" = "red" , "A" = "grey"))+ 
+  theme_bw()
+```
+
+While the distributions are largely similar, the chart does show that Harden has slightly more 3 point attempts at home, and slighlty more 2 point attempts on the road, implying that he may be more comfortable shooting in his home arena. 
+
+
+***Lets put some more ggplots here I think ***
+
+With a better understanding of the data, we can now begin building models for prediction 
+
+----- 
+
+#####  **Further Data Processing**
+
+```{r}
+set.seed(13)
+
+harden1<-harden[sample(nrow(harden)), ] %>% 
+  select(-MATCHUP, -CLOSEST_DEFENDER, -PTS_TYPE, - player_name, -PERIOD)
+
+harden1<-as.data.frame(model.matrix(~. -1, data=harden1))
+
+normalize <- function(x) { 
+  return((x - min(x)) / (max(x) - min(x)))
+}
+
+harden_norm <- as.data.frame(lapply(harden1, normalize))
+
+harden_norm$FGM1<-as.factor(harden_norm$FGM1)
+
+split<-round(.80*(nrow(harden_norm)))
+
+harden_train<-harden_norm[1:split, ]
+
+harden_test<-harden_norm[(split+1): nrow(harden_norm), ]
+```
+
+----- 
+
+#####  **kNN**
+
+```{r}
+knn_train<-harden_train %>% select(-FGM1)
+knn_test<-harden_test %>% select(-FGM1)
+
+knn_train_labels<-harden_train[ , "FGM1"]
+knn_test_labels<-harden_test[ , "FGM1"]
+
+knn_predictions <- knn(train = knn_train, test = knn_test, cl = knn_train_labels, k=3)
+
+round(confusionMatrix(knn_test_labels, knn_predictions)$overall["Accuracy"]*100, 1)
+```
+
+----- 
+
+#####  **SVM - Vanilla Kernel**
+```{r}
+svm_classifier <- ksvm(FGM1 ~ ., data = harden_train, kernel = "vanilladot", kpar=list())
+
+svm_predictions <- predict(svm_classifier, harden_test)
+
+round(confusionMatrix(harden_test$FGM1, svm_predictions)$overall["Accuracy"]*100, 1)
+```
+
+
+#####  **SVM - Radial Kernel**
+```{r}
+svm_classifier2 <- ksvm(FGM1 ~ ., data = harden_train, kernel = "rbfdot", kpar=list())
+
+svm_predictions2 <- predict(svm_classifier2, harden_test)
+
+round(confusionMatrix(harden_test$FGM1, svm_predictions2)$overall["Accuracy"]*100, 1)
+```
+
+----- 
+
+#####  **Neural Network**
+```{r}
+ann_classifier <- neuralnet(FGM1 ~ ., data = harden_train)
+
+ann_test<-harden_test %>% select(-FGM1)
+
+ann_results <- compute(ann_classifier, ann_test)
+
+ann_predictions<-as.data.frame(ann_results$net.result) %>% 
+  mutate(ann_pred=as.factor(ifelse(V2 > V1, 1, 0))) %>% select(ann_pred)
+
+round(confusionMatrix(harden_test$FGM1, ann_predictions$ann_pred)$overall["Accuracy"]*100, 1)
+```
+
+
+#####  **Neural Network - 5 Hidden Layers**
+```{r}
+ann_classifier2 <- neuralnet(FGM1 ~ ., data = harden_train, hidden = 5)
+
+ann_test<-harden_test %>% select(-FGM1)
+
+ann_results2 <- compute(ann_classifier2, ann_test)
+
+ann_predictions2<-as.data.frame(ann_results2$net.result) %>% 
+  mutate(ann_pred=as.factor(ifelse(V2 > V1, 1, 0))) %>% select(ann_pred)
+
+round(confusionMatrix(harden_test$FGM1, ann_predictions2$ann_pred)$overall["Accuracy"]*100, 1)
+```
+
+----- 
+
+#####  **Decision Tree**
+```{r}
+dec_classifier <- C5.0(FGM1 ~ ., data = harden_train)
+
+dec_predictions <- predict(dec_classifier, harden_test)
+
+round(confusionMatrix(harden_test$FGM1, dec_predictions)$overall["Accuracy"]*100, 1)
+```
+
+
+#####  **Decision Tree - Boosted**
+```{r}
+dec10_classifier <- C5.0(FGM1 ~ ., data = harden_train, trials=10)
+
+dec10_predictions <- predict(dec10_classifier, harden_test)
+
+round(confusionMatrix(harden_test$FGM1, dec10_predictions)$overall["Accuracy"]*100, 1)
+```
+
+----- 
+
+#####  **Stacked Model**
+
+```{r}
+# combining all predictions that will be used as inputs later 
+
+testing_predictions<-data.frame(knn_predictions, 
+                                svm_predictions, 
+                                svm_predictions2, 
+                                ann_predictions, 
+                                ann_predictions2, 
+                                dec_predictions, 
+                                dec10_predictions)
+                        
+
+# making predictions on training dataset 
+
+knn_predictions_train <- knn(train = knn_train, test = knn_train, cl = knn_train_labels, k=3)
+
+# . . . . . . . . . . . . . .  . . . . . . . . . . .  . . . . . . . . . . .  . . . . . . . . . . . 
+
+svm_predictions_train <- predict(svm_classifier, harden_train)
+
+svm_predictions_train2 <- predict(svm_classifier2, harden_train)
+
+# . . . . . . . . . . . . . .  . . . . . . . . . . .  . . . . . . . . . . .  . . . . . . . . . . . 
+
+ann_train<-harden_train %>% select(-FGM1)
+
+ann_results_train <- compute(ann_classifier, ann_train)
+
+ann_predictions_train<-as.data.frame(ann_results_train$net.result) %>%
+  mutate(ann_pred=as.factor(ifelse(V2 > V1, 1, 0))) %>% select(ann_pred)
+
+ann_results_train2 <- compute(ann_classifier2, ann_train)
+
+ann_predictions_train2<-as.data.frame(ann_results_train2$net.result) %>% 
+  mutate(ann_pred=as.factor(ifelse(V2 > V1, 1, 0))) %>% select(ann_pred)
+
+# . . . . . . . . . . . . . .  . . . . . . . . . . .  . . . . . . . . . . .  . . . . . . . . . . . 
+
+dec_predictions_train <- predict(dec_classifier, harden_train)
+
+dec10_predictions_train <- predict(dec10_classifier, harden_train)
+
+# . . . . . . . . . . . . . .  . . . . . . . . . . .  . . . . . . . . . . .  . . . . . . . . . . . 
+
+training_predictions<-data.frame(knn_predictions_train, 
+                                 svm_predictions_train, 
+                                 svm_predictions_train2,
+                                 ann_predictions_train, 
+                                 ann_predictions_train2, 
+                                 dec_predictions_train, 
+                                 dec10_predictions_train)
+
+# making names match
+names(training_predictions)<-names(testing_predictions)
+
+# stacked tree
+harden_stacked_tree<-C5.0(harden_train$FGM1 ~ ., data = training_predictions)
+
+stacked_tree_predictions<-predict(harden_stacked_tree, testing_predictions)
+
+round(confusionMatrix(harden_test$FGM1, stacked_tree_predictions)$overall["Accuracy"]*100, 1)
+```
+
+
+----- 
