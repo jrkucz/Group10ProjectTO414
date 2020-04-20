@@ -1,0 +1,320 @@
+---
+title: "Entire Shot Log Analysis"
+author: "Jack Kuczmanski"
+date: "4/19/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## **Predicting NBA Shot Outcomes**
+
+------
+
+```{r}
+shot_logs <- read.csv("shot_logs.csv")
+```
+
+The dataset ` shot_logs` was sourced from kaggle, and contains information on shots taken during the 2014-2015 season. With this data, we will build a model that predicts whether or the shooter will make his shot. In doing this analysis, we will gain an understanding of what factors contribute to the likelihood of making a shot in the NBA. Furthermore, with a model in hand, we can conduct more thorough analyses regarding individual players and defenders. 
+
+------
+
+### **Checking Structure** 
+To begin, we will take a look at the structure of the data. 
+
+```{r}
+str(shot_logs)
+summary(shot_logs)
+
+```
+
+------
+
+
+### **Preparing & Cleaning Data** 
+In observing the structure of the data, we can see that there are columns that contain redundant information, or information that won't be relevant in prediction. We will remove those columns.
+
+```{r}
+shot_logs$GAME_ID<-NULL
+shot_logs$MATCHUP<-NULL
+shot_logs$LOCATION<-NULL
+shot_logs$W<-NULL
+shot_logs$FINAL_MARGIN<-NULL
+shot_logs$GAME_CLOCK<-NULL
+shot_logs$SHOT_RESULT<-NULL
+shot_logs$CLOSEST_DEFENDER_PLAYER_ID<-NULL
+shot_logs$player_id<-NULL
+shot_logs$PTS <- NULL
+
+#Removing shot clock NA values
+
+shot_logs$SHOT_CLOCK <- ifelse(is.na(shot_logs$SHOT_CLOCK) == TRUE, mean(shot_logs$SHOT_CLOCK, na.rm = TRUE), shot_logs$SHOT_CLOCK)
+summary(shot_logs$SHOT_CLOCK)
+
+```
+
+Secondly, there are columns that should be re-coded as factors, including our response variable, ` FGM`, which indicates whether or not the shot was made. 
+
+```{r}
+shot_logs$FGM<-as.factor(shot_logs$FGM)
+shot_logs$PERIOD<-as.factor(shot_logs$PERIOD)
+shot_logs$PTS_TYPE<-as.factor(shot_logs$PTS_TYPE)
+```
+
+Third, we would like to create a few new variables from our existing ones, to uncover some more specific shot type input
+
+```{r}
+#Creating a shot type variable based on shot distance
+shot_logs$shot_type <- ifelse(shot_logs$SHOT_DIST < 3, "Lay-up/Dunk", ifelse(shot_logs$SHOT_DIST < 12, "Short Two", ifelse(shot_logs$SHOT_DIST < 22, "Long Two", ifelse(shot_logs$SHOT_DIST < 23.9, "Longest Two/Three Pointer", "Three Pointer"))))
+shot_logs$shot_type <- as.factor(shot_logs$shot_type)
+
+#Creating a variable determining whether it was catch and shoot or dribbling
+shot_logs$dribble_or_not <- ifelse(shot_logs$DRIBBLES == 0, "Catch & Shoot", "Off Dribble") 
+shot_logs$dribble_or_not <- as.factor(shot_logs$dribble_or_not)
+
+#Creating a variable grouping shot clock positioning
+shot_logs$timing <- ifelse(shot_logs$SHOT_CLOCK < 3, "Late", ifelse(shot_logs$SHOT_CLOCK < 10, "Middle", "Early"))
+shot_logs$timing <- as.factor(shot_logs$timing)
+
+
+#Creating a variable defining how open or contested the shot is
+shot_logs$openness <- ifelse(shot_logs$CLOSE_DEF_DIST < 2, "Heavily Contested", ifelse(shot_logs$CLOSE_DEF_DIST < 6, "Contested", "Open"))
+shot_logs$openness <- as.factor(shot_logs$openness)
+
+```
+
+------
+
+### **Re-Checking Structure** 
+```{r}
+str(shot_logs)
+```
+
+------
+
+### **Testing Significance with Logistic Regression** 
+With the data prepared, we can make an initial logistic regression to get an idea for the significance of certain variables regarding their relation to whether or not a shot was made. 
+
+#### Regression Part 1: Numeric Variables
+
+We will look at all the numeric variables we have: 
+
+* ` DRIBBLES`: number of dribbles the player took before shooting 
+* ` TOUCH_TIME`: time the player took to shoot after receiveing the ball (seconds)
+* ` SHOT_DIST` : distance the player was from the basket at the time of the shot (feet)
+* ` CLOSE_DEF_DIST`: the distance between the shooter and the nearest defender (feet)
+* ` SHOT_CLOCK`: time remaining on shot clock (seconds)
+
+```{r}
+log_model<-glm(FGM ~ DRIBBLES + TOUCH_TIME + SHOT_DIST + CLOSE_DEF_DIST + SHOT_CLOCK, 
+                     data=shot_logs, family="binomial")
+
+summary(log_model)
+
+```
+
+From the summary of the logistic regression, ` log_model`, we can see that all 5 variables are highly significant in predicting whether or not a shot was made. 
+
+#### Regression Part 2: Factor Variables
+
+Now, let's run a logistic regression on the newly created factor variables
+
+```{r}
+factor_model<-glm(FGM ~ PERIOD + PTS_TYPE + shot_type + dribble_or_not + timing + openness, 
+                     data=shot_logs, family="binomial")
+
+summary(factor_model)
+```
+
+In the factor model, we see some intuitive outcomes. We see that people shoot 3 pointers with less accuracy than 2 pointers. Also, they shoot layups with higher accuracy than any other, further shot. They shoot better early in the shot clock compared to later when there is more pressure. They shoot best open, and worst highly contested. Something interesting to note is that with high significance, people shoot better on catch and shoot plays than they do after dribbling. This is a less obvious metric, and could be a nice insight to share with players. 
+
+Let's run some interacting regressions now to see how these factor variables interact. This will help us paint a more realistic picture of the different types of shots NBA players take, to then give them better advice.
+
+```{r}
+factor_model2 <- glm(FGM ~ shot_type * dribble_or_not + openness * dribble_or_not + openness * shot_type, 
+                     data=shot_logs, family="binomial")
+
+summary(factor_model2)
+```
+
+
+*Next, create regressions combining things like quarter and contention or quarter and shot clock or quarter and shot type*
+------
+
+### Decision Tree for All Players
+
+#### Set Up Data
+```{r}
+#Remove the large factors from dataset, as this will just examine the shot characteristics, not the players themselves
+shot_logs_algo <- shot_logs[, -c(8,11)]
+str(shot_logs_algo)
+
+library(caret)
+#Randomize data
+set.seed(123)
+
+shot_logs_algo <- shot_logs_algo[sample(nrow(shot_logs_algo)), ]
+
+shot_logs_algo_mm <- as.data.frame(model.matrix(~. -1, data=shot_logs_algo))
+str(shot_logs_algo_mm)
+
+#Normalize numeric variables
+normalize <- function(x) { 
+  return((x - min(x)) / (max(x) - min(x)))
+}
+
+#Apply normalization
+shot_logs_algo_norm <- as.data.frame(lapply(shot_logs_algo_mm[1:24], normalize))
+
+#Make outcome variable a factor
+shot_logs_algo_norm$FGM1 <- as.factor(shot_logs_algo_norm$FGM1)
+str(shot_logs_algo_norm)
+
+#Create Test and Train Data - Utilizing an 80/20 split
+shot_train <- shot_logs_algo_norm[1:102455,]
+shot_test <- shot_logs_algo_norm[102456:nrow(shot_logs_algo_norm),]
+
+
+#Get good proportions of made to miss so it's representative
+prop.table(table(shot_train$FGM1))
+prop.table(table(shot_test$FGM1))
+
+
+```
+
+#### Run Decision Tree
+
+```{r}
+library(C50)
+FGM_model <- C5.0(shot_train[-15], shot_train$FGM1)
+
+#Information, simple and detailed, about the model
+FGM_model
+
+summary(FGM_model)
+
+#Decision Tree Prediction vs. Actual Legendary Status
+FGM_pred <- predict(FGM_model, shot_test)
+
+library(gmodels)
+library(caret)
+
+#Accuracy Measure, both in pure accuracy %, and diagnosing correct vs. error types
+round(confusionMatrix(shot_test$FGM1, FGM_pred)$overall["Accuracy"]*100, 1)
+
+CrossTable(shot_test$FGM1, FGM_pred,
+           prop.chisq = FALSE, prop.c = FALSE, prop.r = FALSE,
+           dnn = c('actual make/miss', 'predicted make/miss'))
+```
+
+#### Attempt to Improve Model
+
+```{r}
+library(C50)
+FGM_model2 <- C5.0(shot_train[-15], shot_train$FGM1, trials = 10)
+
+#Information, simple and detailed, about the model
+FGM_model2
+
+summary(FGM_model2)
+
+#Decision Tree Prediction vs. Actual Legendary Status
+FGM_pred2 <- predict(FGM_model2, shot_test)
+
+library(gmodels)
+library(caret)
+
+#Accuracy Measure, both in pure accuracy %, and diagnosing correct vs. error types
+round(confusionMatrix(shot_test$FGM1, FGM_pred2)$overall["Accuracy"]*100, 1)
+
+CrossTable(shot_test$FGM1, FGM_pred2,
+           prop.chisq = FALSE, prop.c = FALSE, prop.r = FALSE,
+           dnn = c('actual make/miss', 'predicted make/miss'))
+
+
+```
+
+### SVM for all players
+```{r}
+#Pull in kernlab
+library(kernlab)
+
+shot_classifier <- ksvm(FGM1 ~ ., data = shot_train, kernel = "vanilladot")
+
+shot_predictions <- predict(shot_classifier, shot_test)
+
+library(gmodels)
+library(caret)
+
+#Get a model accuracy for the SVM prediction
+round(confusionMatrix(shot_test$FGM1, shot_predictions)$overall["Accuracy"]*100, 1)
+
+#Compare the actual test class results to the predicted
+CrossTable(x = shot_test$FGM1, y = shot_predictions, prop.chisq = FALSE)
+```
+
+### Graphical Analysis of Entire League Shot Log
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+lebron <- shot_logs %>% filter(player_name=="lebron james")
+str(lebron)
+
+
+#Graphing FGM as Product of Shot Distance and Time With Ball
+ggplot(lebron, aes(x = TOUCH_TIME, y = SHOT_DIST, colour = FGM)) + geom_point(alpha = 1, size = 3) + labs(x = "Time With Ball in Hand", y = "Shot Distance") + ggtitle("FGM as Product of Distance and Time with Ball") + xlim(0,24) + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),  panel.background = element_rect(fill = "white"), plot.title = element_text(hjust = 0.5, face = "bold"),panel.border = element_rect(colour = "black", fill=NA, size=1),legend.key=element_blank()) + geom_hline(yintercept = 23.9, linetype = "dashed") + geom_text(aes(23,23.9,label = "3 Point Line", vjust = 1))
+
+```
+
+*In this graph, we see the "made shots" shows in blue, and "missed shots" in red. We see that for close range shots, Lebron appears to be highly accurate, with high volumes of blue mixed in for the red. This graph shows him with all types of coverage levels, so he definitely is skilled close to the rim. However, when looking at his 3 point metrics, as well as his longer two point metrics, we see a decrease in accuracy, with more red than blue by a large margin. While this is the case for even great long range shooters, we see that Lebron is pretty dominant on the inside, and should utilize that strength to keep percentages high. Time with ball in hand isn't too significant here, but it does appear that Lebron shoots the vast majority of his shots quickly from when he gets the ball. This has proved well for him.*
+
+#### FGM Proportion by Shot Type
+
+```{r}
+
+ggplot(lebron,aes(x = shot_type, fill = FGM)) + geom_bar(position = "fill") + labs(x = "Shot Type", y = "FGM Proportion") + ggtitle("FGM Proportion by Shot Type") + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),  panel.background = element_rect(fill = "white"), plot.title = element_text(hjust = 0.5, face = "bold"),panel.border = element_rect(colour = "black", fill=NA, size=1),legend.key=element_blank()) 
+
+```
+
+*Here we see Lebron's scoring distribution by shot type. He is unsurprisingly best the closer he is to the hoop, and what's good is he knows that. From the scatter graph above, he shoots much more often by the rim, sticking to his strenghts. This can make him more predictable.*
+
+#### FGM Proportion by Shot Contestion Level
+
+```{r}
+
+ggplot(lebron,aes(x = openness, fill = FGM)) + geom_bar(position = "fill") + labs(x = "Shot Contestion Level", y = "FGM Proportion") + ggtitle("FGM Proportion by Shot Contestion Level") + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),  panel.background = element_rect(fill = "white"), plot.title = element_text(hjust = 0.5, face = "bold"),panel.border = element_rect(colour = "black", fill=NA, size=1),legend.key=element_blank())
+
+```
+
+*Lebron can score with all types of defenders and defensive coverages on him. This consistency takes a confounding variable of coverage out of the equation a little, so the algorithm can focus on things related to the shot itself, thus perhaps making him more predictable.*
+
+#### FGM by Dribble Type
+
+```{r}
+
+ggplot(lebron,aes(x = dribble_or_not, fill = FGM)) + geom_bar(position = "fill") + labs(x = "Dribble Type", y = "FGM Proportion") + ggtitle("FGM by Dribble Type") + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),  panel.background = element_rect(fill = "white"), plot.title = element_text(hjust = 0.5, face = "bold"),panel.border = element_rect(colour = "black", fill=NA, size=1),legend.key=element_blank())
+
+```
+
+*This is another cool thing about Lebron, that he is consistent with both types of dribble. He can do the quick catch and shoot, and the dribble to create his own shot, with similar accuracy. They both hover around his 49% accuracy, making him more predictable.*
+
+#### Dribble Type by Shot Selection
+
+```{r}
+ggplot(lebron,aes(x = PTS_TYPE, fill = dribble_or_not)) + geom_bar(position = "fill") + labs(x = "Number of Points", y = "Dribble Type Proportion") + ggtitle("Dribble Type by Shot Selection") + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),  panel.background = element_rect(fill = "white"), plot.title = element_text(hjust = 0.5, face = "bold"),panel.border = element_rect(colour = "black", fill=NA, size=1),legend.key=element_blank()) + scale_fill_discrete(name = "Dribble Type")
+```
+
+*This is how Lebron chooses to shoot, based on the point type it is. We see that in two pointers, he much more frequently is off the dribble. This makes sense, as he could be driving to the hoop, or making a down low play to get open. He also, predictably is less off-the-dribble for 3 pointers. 3 pointers off the dribble bring in a lot of inconsistency, whereas catch and shoot could mean the player is more open and balanced.*
+
+#### Points Type by Contestion Level
+
+```{r}
+ggplot(lebron,aes(x = openness, fill = PTS_TYPE)) + geom_bar(position = "fill") + labs(x = "Level of Contestion", y = "Proportion of Points Type") + ggtitle("Points Type by Contestion Level") + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),  panel.background = element_rect(fill = "white"), plot.title = element_text(hjust = 0.5, face = "bold"),panel.border = element_rect(colour = "black", fill=NA, size=1),legend.key=element_blank()) 
+```
+
+*This is an insightful look into why Lebron may be a more predictable shooter than Harden. We see Lebron with an extremely low percentage of heavily contested three point shots. 2 pointers are more "heavily contested" naturally, since you are by defenders at the hoop. So, this is a smartness that leads to consistency. Lebron saves his 3 pointers mostly to times when open.*
+
